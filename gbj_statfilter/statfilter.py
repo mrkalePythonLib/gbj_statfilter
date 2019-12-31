@@ -16,6 +16,26 @@ from enum import Enum
 from typing import Optional, Any, NoReturn, List
 
 
+def register(func):
+        """Decorator of astatistical function by registering its value."""
+
+        def _decorator(self, value):
+            result = self._register(value)
+            if result is None:
+                return None
+            if self.readings:
+                result = func(self, result)
+            if result is not None:
+                msg = \
+                    f'Buffer={self.buffer_len}' \
+                    f', Type={self.stat_type.name}' \
+                    f', Value={value}' \
+                    f', Statistic={result}'
+                self._logger.debug(msg)
+            return result
+        return _decorator
+
+
 ###############################################################################
 # Abstract class as a base for all statistical filters
 ###############################################################################
@@ -120,7 +140,7 @@ class StatFilter(ABC):
     @abstractmethod
     def reset(self):
         """Reset instance object to initial state."""
-        ...
+        self._buffer = []
 
     @abstractmethod
     def result(self, value: Optional[float]) -> Optional[float]:
@@ -341,43 +361,24 @@ class Running(StatFilter):
             self._buffer = [None] * self.BufferLength.DEFAULT.value
         self._buffer = [None] * self.buffer_len
 
-    def _REGISTER(func):
-        """Decorate statistical function by registering its value."""
-
-        def _decorator(self, value):
-            result = self._register(value)
-            if result is None:
-                return
-            if self.readings:
-                result = func(self, result)
-            if result is not None:
-                msg = \
-                    f'Buffer={self.buffer_len}' \
-                    f', Type={self.stat_type.name}' \
-                    f', Value={value}' \
-                    f', Statistic={result}'
-                self._logger.debug(msg)
-            return result
-        return _decorator
-
-    @_REGISTER
+    @register
     def result_min(self, value: float = None) -> float:
         """Calculate minimum from data buffer."""
         return min([i for i in self._buffer if i is not None])
 
-    @_REGISTER
+    @register
     def result_max(self, value: float = None) -> float:
         """Calculate maximum from data buffer."""
         return max([i for i in self._buffer if i is not None])
 
-    @_REGISTER
+    @register
     def result_avg(self, value: float = None) -> float:
         """Calculate mean from data buffer."""
         l = [i for i in self._buffer if i is not None]
         if len(l):
             return sum(l) / len(l)
 
-    @_REGISTER
+    @register
     def result_med(self, value: float = None) -> float:
         """Calculate median from data buffer."""
         l = self.readings
