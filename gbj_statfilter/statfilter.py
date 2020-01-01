@@ -3,7 +3,7 @@
 __version__ = '0.7.0'
 __status__ = 'Beta'
 __author__ = 'Libor Gabaj'
-__copyright__ = 'Copyright 2018-2019, ' + __author__
+__copyright__ = 'Copyright 2018-2020, ' + __author__
 __credits__ = []
 __license__ = 'MIT'
 __maintainer__ = __author__
@@ -13,27 +13,32 @@ __email__ = 'libor.gabaj@gmail.com'
 import logging
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, Any, NoReturn, List
+from typing import Optional, NoReturn
 
 
 def register(func):
-        """Decorator of astatistical function by registering its value."""
+    """Decorator of astatistical function by registering its value."""
 
-        def _decorator(self, value):
-            result = self._register(value)
-            if result is None:
-                return None
+    def _decorator(self, value: float = None):
+        value = self.filter(value)
+        if value is not None:
+            # Shift if any real value is stored
             if self.readings:
-                result = func(self, result)
-            if result is not None:
-                msg = \
-                    f'Buffer={self.buffer_len}' \
-                    f', Type={self.stat_type.name}' \
-                    f', Value={value}' \
-                    f', Statistic={result}'
-                self._logger.debug(msg)
-            return result
-        return _decorator
+                for i in range(self.buffer_len - 1, 0, -1):
+                    self.buffer[i] = self.buffer[i - 1]
+            self.buffer[0] = value
+        result = value
+        if self.readings:
+            result = func(self, result)
+        if result is not None:
+            msg = \
+                f'Buffer={self.buffer_len}' \
+                f', Type={self.stat_type.name}' \
+                f', Value={value}' \
+                f', Statistic={result}'
+            self.logger.debug(msg)
+        return result
+    return _decorator
 
 
 ###############################################################################
@@ -46,9 +51,9 @@ class StatFilter(ABC):
         """Create the class instance - constructor."""
         self.reset()
         # Logging
-        self._logger = logging.getLogger(' '.join([__name__, __version__]))
-        self._logger.debug(
-            f'Instance of "{self.__class__.__name__}" created')
+        msg = f'Instance of "{self.__class__.__name__}" created'
+        self.logger = logging.getLogger(' '.join([__name__, __version__]))
+        self.logger.debug(msg)
 
     @abstractmethod
     def __str__(self) -> str:
@@ -75,8 +80,8 @@ class StatFilter(ABC):
         except (TypeError, ValueError):
             if value is None:
                 self._value_min = None
-        self._logger.debug(
-            f'Minimal value set to {self._value_min}')
+        msg = f'Minimal value set to {self._value_min}'
+        self.logger.debug(msg)
 
     @property
     def value_max(self) -> float:
@@ -93,8 +98,8 @@ class StatFilter(ABC):
         except (TypeError, ValueError):
             if value is None:
                 self._value_max = None
-        self._logger.debug(
-            f'Maximal value set to {self._value_max}')
+        msg = f'Maximal value set to {self._value_max}'
+        self.logger.debug(msg)
 
     def filter(self, value: Optional[float]) -> Optional[float]:
         """Filter value against acceptable value range.
@@ -114,11 +119,11 @@ class StatFilter(ABC):
             return None
         if self.value_max is not None and value > self.value_max:
             errmsg = f'Rejected value {value} greater than {self.value_max}'
-            self._logger.warning(errmsg)
+            self.logger.warning(errmsg)
             return None
         if self.value_min is not None and value < self.value_min:
             errmsg = f'Rejected value {value} less than {self.value_min}'
-            self._logger.warning(errmsg)
+            self.logger.warning(errmsg)
             return None
         return value
 
@@ -135,15 +140,15 @@ class StatFilter(ABC):
           buffer at the end of a measurement cycle.
 
         """
-        return len([i for i in self._buffer if i is not None])
+        return len([i for i in self.buffer if i is not None])
 
     @abstractmethod
     def reset(self):
         """Reset instance object to initial state."""
-        self._buffer = []
+        self.buffer = []
 
     @abstractmethod
-    def result(self, value: Optional[float]) -> Optional[float]:
+    def result(self, value: float = None) -> Optional[float]:
         """Calculate statistically smoothed value.
 
         Arguments
@@ -166,6 +171,7 @@ class Exponential(StatFilter):
     """Exponential statistical smoothing."""
 
     class Factor(Enum):
+        """Exponential factor parameters."""
         DEFAULT = 0.5   # Running average
         MINIMUM = 0.0   # Only the very first value
         MAXIMUM = 1.0   # Only the newest value
@@ -202,12 +208,12 @@ class Exponential(StatFilter):
         f_min = self.Factor.MINIMUM.value
         f_max = self.Factor.MAXIMUM.value
         self._factor = max(min(abs(self._factor), f_max), f_min)
-        self._logger.debug(
-            f'Smoothing factor set to {self._factor}')
+        msg = f'Smoothing factor set to {self._factor}'
+        self.logger.debug(msg)
 
     def reset(self) -> NoReturn:
         """Reset instance object to initial state."""
-        self._buffer = [None]
+        self.buffer = [None]
 
     def result(self, value: float = None) -> Optional[float]:
         """Calculate statistically smoothed value.
@@ -234,15 +240,15 @@ class Exponential(StatFilter):
         value = super().result(value)
         if value is not None:
             if self.readings:
-                self._buffer[0] += self.factor * (value - self._buffer[0])
+                self.buffer[0] += self.factor * (value - self.buffer[0])
             else:
-                self._buffer[0] = value
+                self.buffer[0] = value
             msg = \
                 f'Factor={self.factor}' \
                 f', Value={value}' \
-                f', Statistic={self._buffer[0]}'
-            self._logger.debug(msg)
-        return self._buffer[0]
+                f', Statistic={self.buffer[0]}'
+            self.logger.debug(msg)
+        return self.buffer[0]
 
 
 ###############################################################################
@@ -252,11 +258,13 @@ class Running(StatFilter):
     """Running statistical smoothing."""
 
     class BufferLength(Enum):
+        """Sample buffer parameters."""
         DEFAULT = 5
         MINIMUM = 1
         MAXIMUM = 15
 
     class StatisticType(Enum):
+        """Supported statistical types."""
         AVERAGE = 'AVG'
         MINIMUM = 'MIN'
         MAXIMUM = 'MAX'
@@ -287,7 +295,7 @@ class Running(StatFilter):
           method returns the actual length.
 
         """
-        return len(self._buffer)
+        return len(self.buffer)
 
     @buffer_len.setter
     def buffer_len(self, value: int) -> NoReturn:
@@ -302,12 +310,12 @@ class Running(StatFilter):
             b_max = self.BufferLength.MAXIMUM.value
             buffer_len = max(min(buffer_len, b_max), b_min)
             if self.buffer_len < buffer_len:
-                self._buffer.extend([None] * (buffer_len - self.buffer_len))
+                self.buffer.extend([None] * (buffer_len - self.buffer_len))
             elif self.buffer_len > buffer_len:
                 for i in range(self.buffer_len - buffer_len):
-                    self._buffer.pop(i)
-            self._logger.debug(
-                f'Buffer length set to {self.buffer_len}')
+                    self.buffer.pop(i)
+            msg = f'Buffer length set to {self.buffer_len}'
+            self.logger.debug(msg)
 
     @property
     def stat_type(self) -> str:
@@ -322,70 +330,56 @@ class Running(StatFilter):
         """Set default statistic type if correct."""
         if isinstance(def_stat, self.StatisticType):
             self._def_stat = def_stat
-            self._logger.debug(
-                f'Statistic type set to {self._def_stat.name}')
-
-    def _register(self, value: float) -> NoReturn:
-        """Filter and register new value to the data buffer.
-
-        Arguments
-        ---------
-        value
-            Sample value to be registered in the data buffer and use for
-            statistical smoothing.
-
-        Notes
-        -----
-        - If the instance of statistical filter has an instance of value
-          filter, the input value is filtered against it.
-        - If new value does not fit to the filter range, it is ignored.
-        - The most recent (fresh) sample value is always in the 0 index of the
-          data buffer.
-        - Sample values are shifted to the right in the data buffer (to higher
-          indices), so that the most recent value is lost.
-
-        """
-        value = self.filter(value)
-        if value is not None:
-            self.buffer_len  # Init buffer for sure
-            # Shift if any real value is stored
-            if self.readings:
-                for i in range(self.buffer_len - 1, 0, -1):
-                    self._buffer[i] = self._buffer[i - 1]
-            self._buffer[0] = value
-        return value
+            msg = f'Statistic type set to {self._def_stat.name}'
+            self.logger.debug(msg)
 
     def reset(self) -> NoReturn:
         """Reset instance object to initial state."""
         if not hasattr(self, '_buffer'):
-            self._buffer = [None] * self.BufferLength.DEFAULT.value
-        self._buffer = [None] * self.buffer_len
+            self.buffer = [None] * self.BufferLength.DEFAULT.value
+        self.buffer = [None] * self.buffer_len
 
-    @register
-    def result_min(self, value: float = None) -> float:
+    def result_min(self) -> float:
         """Calculate minimum from data buffer."""
-        return min([i for i in self._buffer if i is not None])
+        return min([i for i in self.buffer if i is not None])
 
-    @register
-    def result_max(self, value: float = None) -> float:
+    def result_max(self) -> float:
         """Calculate maximum from data buffer."""
-        return max([i for i in self._buffer if i is not None])
+        return max([i for i in self.buffer if i is not None])
 
-    @register
-    def result_avg(self, value: float = None) -> float:
+    def result_avg(self) -> float:
         """Calculate mean from data buffer."""
-        l = [i for i in self._buffer if i is not None]
-        if len(l):
-            return sum(l) / len(l)
+        lov = [i for i in self.buffer if i is not None]
+        if lov:
+            return sum(lov) / len(lov)
+        return None
+
+    def result_med(self) -> float:
+        """Calculate median from data buffer."""
+        samples = self.readings
+        if samples:
+            return self.buffer[samples // 2]
+        return None
 
     @register
-    def result_med(self, value: float = None) -> float:
-        """Calculate median from data buffer."""
-        l = self.readings
-        if l:
-            return self._buffer[l // 2]
-
     def result(self, value: float = None) -> float:
-        """Calculate default statistic from data buffer."""
-        func = eval('self.result_' + self._def_stat.value.lower())
-        return func(value)
+        """Calculate default statistic from data buffer.
+
+        Arguments
+        ---------
+        value
+            Sample value to be smoothed.
+
+        Returns
+        -------
+        If None input value is provided, recent result is returned,
+        otherwise the new smoothed value is.
+
+        Notes
+        -----
+        - The method calculates a new filtered value from the input value and
+          previous stored values in the class instance object.
+
+        """
+        func = getattr(self, f'result_{self._def_stat.value.lower()}')
+        return func()
